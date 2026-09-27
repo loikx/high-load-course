@@ -12,6 +12,7 @@ import ru.quipy.payments.api.PaymentAggregate
 import java.net.SocketTimeoutException
 import java.time.Duration
 import java.util.*
+import java.util.concurrent.TimeUnit
 
 
 // Advice: always treat time as a Duration
@@ -40,27 +41,50 @@ class PaymentExternalSystemAdapterImpl(
     private val paymentLimiter =
         SlidingWindowRateLimiter(rate = rateLimitPerSec.toLong(), window = Duration.ofSeconds(1))
 
+    private val semaphore = Semaphore(parallelRequests)
+
     override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long) {
+        val transactionId = UUID.randomUUID()
+
         val now = System.currentTimeMillis()
-        val timeout = maxOf(0, deadline - now)
-        if (!paymentLimiter.tickBlocking(Duration.ofSeconds(timeout))) {
-            logger.warn("[$accountName] wait before payment for $paymentId")
+        val remainingTime = maxOf(0, deadline - now)
+
+        val acquired = try {
+            if (remainingTime > 0) {
+                semaphore.tryAcquire(remainingTime, TimeUnit.MILLISECONDS)
+            } else {
+                false
+            }
+        } catch (_: InterruptedException) {
+            logger.warn("[$accountName] Interrupted while waiting for semaphore for payment $paymentId")
             return
         }
 
-        logger.info("[$accountName] Submitting payment request for payment $paymentId")
-
-        val transactionId = UUID.randomUUID()
-
-        // Вне зависимости от исхода оплаты важно отметить что она была отправлена.
-        // Это требуется сделать ВО ВСЕХ СЛУЧАЯХ, поскольку эта информация используется сервисом тестирования.
-        paymentESService.update(paymentId) {
-            it.logSubmission(success = true, transactionId, now(), Duration.ofMillis(now() - paymentStartedAt))
+        if (!acquired) {
+            logger.warn("[$accountName] Could not acquire semaphore within deadline for payment $paymentId")
+            paymentESService.update(paymentId) {
+                it.logProcessing(false, now(), transactionId, reason = "Semaphore acquisition timeout")
+            }
+            return
         }
-
-        logger.info("[$accountName] Submit: $paymentId , txId: $transactionId")
-
         try {
+            val now = System.currentTimeMillis()
+            val deadlineTimeout = maxOf(0, deadline - now)
+            if (!paymentLimiter.tickBlocking(Duration.ofSeconds(deadlineTimeout))) {
+                logger.warn("[$accountName] wait before payment for $paymentId")
+                return
+            }
+
+            logger.info("[$accountName] Submitting payment request for payment $paymentId")
+
+            // Вне зависимости от исхода оплаты важно отметить что она была отправлена.
+            // Это требуется сделать ВО ВСЕХ СЛУЧАЯХ, поскольку эта информация используется сервисом тестирования.
+            paymentESService.update(paymentId) {
+                it.logSubmission(success = true, transactionId, now(), Duration.ofMillis(now() - paymentStartedAt))
+            }
+
+            logger.info("[$accountName] Submit: $paymentId , txId: $transactionId")
+
             val request = Request.Builder().run {
                 url("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount")
                 post(emptyBody)
@@ -99,6 +123,8 @@ class PaymentExternalSystemAdapterImpl(
                     }
                 }
             }
+        } finally {
+            semaphore.release()
         }
     }
 
