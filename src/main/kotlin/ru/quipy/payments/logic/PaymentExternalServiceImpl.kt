@@ -43,8 +43,9 @@ class PaymentExternalSystemAdapterImpl(
 
     private val semaphore = Semaphore(parallelRequests)
 
-    override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long) {
+    override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long): Boolean {
         val transactionId = UUID.randomUUID()
+        var result = false
 
         val now = System.currentTimeMillis()
         val remainingTime = maxOf(0, deadline - now)
@@ -57,7 +58,7 @@ class PaymentExternalSystemAdapterImpl(
             }
         } catch (_: InterruptedException) {
             logger.warn("[$accountName] Interrupted while waiting for semaphore for payment $paymentId")
-            return
+            return false
         }
 
         if (!acquired) {
@@ -65,14 +66,14 @@ class PaymentExternalSystemAdapterImpl(
             paymentESService.update(paymentId) {
                 it.logProcessing(false, now(), transactionId, reason = "Semaphore acquisition timeout")
             }
-            return
+            return false
         }
         try {
             val now = System.currentTimeMillis()
             val deadlineTimeout = maxOf(0, deadline - now)
-            if (!paymentLimiter.tickBlocking(Duration.ofSeconds(deadlineTimeout))) {
+            if (!paymentLimiter.tickBlocking(Duration.ofMillis(deadlineTimeout))) {
                 logger.warn("[$accountName] wait before payment for $paymentId")
-                return
+                return false
             }
 
             logger.info("[$accountName] Submitting payment request for payment $paymentId")
@@ -100,6 +101,8 @@ class PaymentExternalSystemAdapterImpl(
 
                 logger.warn("[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, succeeded: ${body.result}, message: ${body.message}")
 
+                result = body.result
+
                 // Здесь мы обновляем состояние оплаты в зависимости от результата в базе данных оплат.
                 // Это требуется сделать ВО ВСЕХ ИСХОДАХ (успешная оплата / неуспешная / ошибочная ситуация)
                 paymentESService.update(paymentId) {
@@ -126,6 +129,8 @@ class PaymentExternalSystemAdapterImpl(
         } finally {
             semaphore.release()
         }
+
+        return result
     }
 
     override fun price() = properties.price
