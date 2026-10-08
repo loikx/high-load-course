@@ -17,7 +17,7 @@ interface PaymentService {
 
  */
 interface PaymentExternalSystemAdapter {
-    fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long)
+    fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long): Boolean
 
     fun name(): String
 
@@ -48,3 +48,5 @@ class ExternalSysResponse(
     val result: Boolean,
     val message: String? = null,
 )
+
+class TooManyRequestsException : RuntimeException()
