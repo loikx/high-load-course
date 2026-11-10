@@ -7,8 +7,8 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import ru.quipy.common.utils.CallerBlockingRejectedExecutionHandler
+import ru.quipy.common.utils.LeakingBucketRateLimiter
 import ru.quipy.common.utils.NamedThreadFactory
-import ru.quipy.common.utils.SlidingWindowRateLimiter
 import ru.quipy.core.EventSourcingService
 import ru.quipy.payments.api.PaymentAggregate
 import java.util.*
@@ -26,8 +26,12 @@ class OrderPayer(meterRegistry: MeterRegistry, @Value("\${payment.rps:16}") priv
         val logger: Logger = LoggerFactory.getLogger(OrderPayer::class.java)
     }
 
-    private val paymentLimiter = SlidingWindowRateLimiter(rateLimitPerSec.toLong(), Duration.ofSeconds(1))
-
+    private val paymentLimiter =
+        LeakingBucketRateLimiter(
+            rateLimitPerSec.toLong(),
+            Duration.ofSeconds(1),
+            rateLimitPerSec * 3,
+        )
     private val processPaymentsGauge = AtomicInteger()
 
     @Autowired
@@ -41,7 +45,7 @@ class OrderPayer(meterRegistry: MeterRegistry, @Value("\${payment.rps:16}") priv
         16,
         0L,
         TimeUnit.MILLISECONDS,
-        LinkedBlockingQueue(32),
+        LinkedBlockingQueue(5),
         NamedThreadFactory("payment-submission-executor"),
         CallerBlockingRejectedExecutionHandler()
     )
@@ -55,16 +59,16 @@ class OrderPayer(meterRegistry: MeterRegistry, @Value("\${payment.rps:16}") priv
         val createdAt = System.currentTimeMillis()
 
         if (deadline <= createdAt) {
-            throw TooManyRequestsException()
+            throw TooManyRequestsException(createdAt + 100)
         }
 
-        //val deadlineTimeout = maxOf(0, deadline - createdAt)
-        if (!paymentLimiter.tick()) {
-            throw TooManyRequestsException()
+        val deadlineTimeout = maxOf(0, deadline - createdAt)
+        if (!paymentLimiter.tickBlocking(Duration.ofSeconds(deadlineTimeout))) {
+            throw TooManyRequestsException(createdAt + 100)
         }
 
         if (paymentExecutor.queue.remainingCapacity() == 0) {
-            throw TooManyRequestsException()
+            throw TooManyRequestsException(createdAt + 100)
         }
 
         paymentExecutor.submit {
@@ -75,7 +79,7 @@ class OrderPayer(meterRegistry: MeterRegistry, @Value("\${payment.rps:16}") priv
                     amount
                 )
             }
-            logger.trace("Payment ${createdEvent.paymentId} for order $orderId created.")
+            logger.trace("Payment {} for order {} created.", createdEvent.paymentId, orderId)
 
             paymentService.submitPaymentRequest(paymentId, amount, createdAt, deadline)
         }

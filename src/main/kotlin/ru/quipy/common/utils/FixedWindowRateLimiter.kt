@@ -13,6 +13,8 @@ import java.util.concurrent.atomic.AtomicInteger
 
 interface RateLimiter {
     fun tick(): Boolean
+    fun tickBlocking()
+    fun tickBlocking(duration: Duration): Boolean
 }
 
 class FixedWindowRateLimiter(
@@ -52,7 +54,11 @@ class FixedWindowRateLimiter(
 
     override fun tick() = semaphore.tryAcquire()
 
-    fun tickBlocking() = semaphore.acquire()
+    override fun tickBlocking() = semaphore.acquire()
+
+    override fun tickBlocking(duration: Duration): Boolean {
+        TODO("Not implemented")
+    }
 }
 
 class SlowStartRateLimiter(
@@ -101,7 +107,11 @@ class SlowStartRateLimiter(
 
     override fun tick() = semaphore.tryAcquire()
 
-    fun tickBlocking() = semaphore.acquire()
+    override fun tickBlocking() = semaphore.acquire()
+
+    override fun tickBlocking(duration: Duration): Boolean {
+        TODO("Not implemented")
+    }
 }
 
 class CountingRateLimiter(
@@ -129,6 +139,14 @@ class CountingRateLimiter(
                 return false
             }
         }
+    }
+
+    override fun tickBlocking() {
+        TODO("Not implemented")
+    }
+
+    override fun tickBlocking(duration: Duration): Boolean {
+        TODO("Not implemented")
     }
 
     class RlInternal(
