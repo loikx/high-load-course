@@ -19,7 +19,7 @@ class CompositeRateLimiter(
         if (rl1.tick()) return true
         if (rl2.tick()) return true
 
-        val short = Duration.ofMillis( minOf(100L, duration.toMillis()) )
+        val short = Duration.ofMillis( minOf(50L, duration.toMillis()) )
         if (rl1.tickBlocking(short)) return true
         if (rl2.tickBlocking(duration)) return true
 

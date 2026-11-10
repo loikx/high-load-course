@@ -45,7 +45,7 @@ class OrderPayer(meterRegistry: MeterRegistry, @Value("\${payment.rps:16}") priv
         16,
         0L,
         TimeUnit.MILLISECONDS,
-        LinkedBlockingQueue(32),
+        LinkedBlockingQueue(5),
         NamedThreadFactory("payment-submission-executor"),
         CallerBlockingRejectedExecutionHandler()
     )
@@ -59,16 +59,16 @@ class OrderPayer(meterRegistry: MeterRegistry, @Value("\${payment.rps:16}") priv
         val createdAt = System.currentTimeMillis()
 
         if (deadline <= createdAt) {
-            throw TooManyRequestsException(createdAt + 300)
+            throw TooManyRequestsException(createdAt + 100)
         }
 
         val deadlineTimeout = maxOf(0, deadline - createdAt)
         if (!paymentLimiter.tickBlocking(Duration.ofSeconds(deadlineTimeout))) {
-            throw TooManyRequestsException(createdAt + 300)
+            throw TooManyRequestsException(createdAt + 100)
         }
 
         if (paymentExecutor.queue.remainingCapacity() == 0) {
-            throw TooManyRequestsException(createdAt + 300)
+            throw TooManyRequestsException(createdAt + 100)
         }
 
         paymentExecutor.submit {
