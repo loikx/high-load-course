@@ -45,7 +45,7 @@ class OrderPayer(meterRegistry: MeterRegistry, @Value("\${payment.rps:16}") priv
         16,
         0L,
         TimeUnit.MILLISECONDS,
-        LinkedBlockingQueue(5),
+        LinkedBlockingQueue(7),
         NamedThreadFactory("payment-submission-executor"),
         CallerBlockingRejectedExecutionHandler()
     )

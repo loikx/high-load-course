@@ -32,11 +32,15 @@ class PaymentSystemImpl(
 
     override fun submitPaymentRequest(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long) {
         for (account in paymentAccounts) {
-            val res = account.performPaymentAsync(paymentId, amount, paymentStartedAt, deadline)
-            if (res) {
-                successCounter.increment()
-            } else {
-                failCounter.increment()
+            for (i in 1..10) {
+                val res = account.performPaymentAsync(paymentId, amount, paymentStartedAt, deadline)
+                if (res) {
+                    successCounter.increment()
+                    break
+                } else {
+                    failCounter.increment()
+                    Thread.sleep((10 * i).toLong())
+                }
             }
         }
     }
