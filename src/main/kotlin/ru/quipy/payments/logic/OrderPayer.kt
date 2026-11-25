@@ -20,7 +20,12 @@ import java.time.Duration
 
 
 @Service
-class OrderPayer(meterRegistry: MeterRegistry, @Value("\${payment.rps:16}") private val rateLimitPerSec: Int,) {
+class OrderPayer(
+    meterRegistry: MeterRegistry,
+    @Value("\${payment.rps:100}") private val rateLimitPerSec: Int,
+    @Value("\${payment.worker-threads:50}") private val workerThreads: Int,
+    @Value("\${payment.queue-capacity:500}") private val queueCapacity: Int,
+) {
 
     companion object {
         val logger: Logger = LoggerFactory.getLogger(OrderPayer::class.java)
@@ -41,11 +46,11 @@ class OrderPayer(meterRegistry: MeterRegistry, @Value("\${payment.rps:16}") priv
     private lateinit var paymentService: PaymentService
 
     private val paymentExecutor = ThreadPoolExecutor(
-        16,
-        16,
+        workerThreads,
+        workerThreads,
         0L,
         TimeUnit.MILLISECONDS,
-        LinkedBlockingQueue(7),
+        LinkedBlockingQueue(queueCapacity),
         NamedThreadFactory("payment-submission-executor"),
         CallerBlockingRejectedExecutionHandler()
     )
