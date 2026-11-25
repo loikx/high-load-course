@@ -6,6 +6,7 @@ import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
 import java.io.InterruptedIOException
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.RequestBody
 import org.slf4j.LoggerFactory
@@ -25,6 +26,7 @@ class PaymentExternalSystemAdapterImpl(
     private val token: String,
     private val meterRegistry: MeterRegistry,
     private val timeoutMillis: Long,
+    private val useHttp2: Boolean = false,
 ) : PaymentExternalSystemAdapter {
 
     companion object {
@@ -40,6 +42,7 @@ class PaymentExternalSystemAdapterImpl(
     private val parallelRequests = properties.parallelRequests
 
     private val client = OkHttpClient.Builder()
+        .apply { if (useHttp2) protocols(listOf(Protocol.H2_PRIOR_KNOWLEDGE)) }
         .connectTimeout(1000, TimeUnit.MILLISECONDS)
         .readTimeout(timeoutMillis, TimeUnit.MILLISECONDS)
         .writeTimeout(timeoutMillis, TimeUnit.MILLISECONDS)
@@ -119,7 +122,7 @@ class PaymentExternalSystemAdapterImpl(
 
                     logger.warn("[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, succeeded: ${body.result}, message: ${body.message}")
 
-                    result = PaymentAttempt(body.result, !body.result && response.code in listOf(408, 429, 500, 502, 503, 504))
+                    result = PaymentAttempt(body.result, !body.result && response.code in listOf(408, 429, 500, 502, 503, 504, 509))
 
                     outcomeReason = body.message
                 }

@@ -1,10 +1,26 @@
 # Template for the HighLoad course
 This project is based on [Tiny Event Sourcing library](https://github.com/andrsuh/tiny-event-sourcing)
 
-### Case 7: local Windows run
+### Repeat case 7 remotely
+
+The completed implementation stays in GitHub branch `hw-07` (commit `912fde6`).
+From this checkout, run:
+
+```powershell
+./scripts/test-remote.ps1 -Case 7
+```
+
+The script reads credentials from the local `.env` and sends the remote runner
+`branch=hw-07`, `accounts=acc-7`, 5 operations/s, 1000 operations, and a 6000 ms
+processing budget. It deploys the remote branch regardless of your local branch.
+Do not start another run for the same service while a test is still running.
+The remote runner response includes links to logs and Grafana.
+
+### Case 8: local Windows run
 
 Requires Docker Desktop and Java 17+. Maven runs in Docker.
 Credentials are read from the existing `.env`.
+Stop the previously started application on port 8081 first.
 
 ```powershell
 ./scripts/start-local.ps1
@@ -12,10 +28,26 @@ Credentials are read from the existing `.env`.
 ./scripts/test-local.ps1
 ```
 
-The application uses `acc-7`, 5 requests/s, 1000 tests and a 6000 ms processing budget.
+Case 8 parameters from the reference: `acc-9`, 100 operations/s,
+5000 operations, 20000 ms processing budget. Initial settings: 50 payment workers,
+500 queued payments, 1000 ms HTTP timeout, at most two attempts and 6600 ms retry delay.
+HTTP calls and retry delays remain bounded by the total payment deadline.
+Retries are scheduled separately, so the 6600 ms delay does not occupy the
+50 payment-submission workers. Eight scheduler threads execute retry attempts;
+the account semaphore still limits the total number of simultaneous HTTP calls.
+The provider supports cleartext HTTP/2, enabled for payments by default. Cancelling
+a timed-out stream signals cancellation without closing the shared TCP connection.
+Provider status 509 (parallel account limit reached) is treated as retryable.
+Set PAYMENT_HTTP2=false only for a provider without cleartext HTTP/2 support.
+Observed local result with these settings: 5000 successful test operations,
+0 failed, income 2026647 and expenses 155190. Results vary between runs.
+Override settings with PAYMENT_WORKER_THREADS, PAYMENT_QUEUE_CAPACITY,
+PAYMENT_HTTP_TIMEOUT_MS, PAYMENT_MAX_ATTEMPTS, PAYMENT_RETRY_DELAY_MS and PAYMENT_RPS.
+
 Grafana: http://localhost:3000/d/highload-case7 (admin / quipy).
+The same dashboard also shows account `acc-9` during case 8 runs.
 Application logs: `local-app.log`.
-To change the default 2500 ms HTTP timeout, stop the application PID printed by
+To change the default 1000 ms HTTP timeout, stop the application PID printed by
 start-local and run `./scripts/start-local.ps1 -SkipBuild -HttpTimeoutMs 2000`.
 Choose the final timeout from measured latency and test outcomes.
 The actual HTTP call timeout is also bounded by the remaining payment deadline.
@@ -27,8 +59,11 @@ and event-store updates. These durations use seconds.
 A timed-out measurement does not reveal how long the provider would have taken
 to finish. Compare successful throughput and cost as well.
 
-Observed local case 7 result at 2500 ms: 997 successful operations and 3 failures
-out of 1000. Outcomes vary between runs.
+After publishing `hw-08`, its remote test can be started with:
+
+```powershell
+./scripts/test-remote.ps1 -Case 8
+```
 
 ### Run PostgreSql
 This example uses Postgres as an implementation of the Event store. You can see it in `pom.xml`:
