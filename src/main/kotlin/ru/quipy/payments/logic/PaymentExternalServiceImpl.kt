@@ -6,6 +6,7 @@ import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
 import java.io.InterruptedIOException
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.RequestBody
 import org.slf4j.LoggerFactory
@@ -40,6 +41,7 @@ class PaymentExternalSystemAdapterImpl(
     private val parallelRequests = properties.parallelRequests
 
     private val client = OkHttpClient.Builder()
+        .protocols(listOf(Protocol.H2_PRIOR_KNOWLEDGE))
         .connectTimeout(1000, TimeUnit.MILLISECONDS)
         .readTimeout(timeoutMillis, TimeUnit.MILLISECONDS)
         .writeTimeout(timeoutMillis, TimeUnit.MILLISECONDS)
@@ -94,15 +96,26 @@ class PaymentExternalSystemAdapterImpl(
 
             logger.info("[$accountName] Submit: $paymentId , txId: $transactionId")
 
+            // Recalculate the remaining deadline after waiting and event-store writes.
+            val remaining = deadline - now()
+            if (remaining <= 1) {
+                paymentESService.update(paymentId) {
+                    it.logProcessing(false, now(), transactionId, reason = "Deadline exceeded before HTTP call")
+                }
+                return PaymentAttempt(false)
+            }
+            val callBudgetMillis = minOf(timeoutMillis, remaining)
+            // Let the provider return its timeout before our own call timeout expires.
+            val providerBudget = Duration.ofMillis(
+                (callBudgetMillis - minOf(50L, callBudgetMillis / 10)).coerceAtLeast(1)
+            )
             val request = Request.Builder().run {
-                url("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount")
+                url("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount&timeout=$providerBudget")
                 post(emptyBody)
             }.build()
 
-            val remaining = deadline - now()
-            if (remaining <= 0) return PaymentAttempt(false)
             val call = client.newCall(request)
-            call.timeout().timeout(minOf(timeoutMillis, remaining), TimeUnit.MILLISECONDS)
+            call.timeout().timeout(callBudgetMillis, TimeUnit.MILLISECONDS)
             val started = System.nanoTime()
             var status = "error"
             var outcomeReason: String? = null

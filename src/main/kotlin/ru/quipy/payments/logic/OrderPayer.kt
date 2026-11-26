@@ -41,8 +41,8 @@ class OrderPayer(meterRegistry: MeterRegistry, @Value("\${payment.rps:16}") priv
     private lateinit var paymentService: PaymentService
 
     private val paymentExecutor = ThreadPoolExecutor(
-        16,
-        16,
+        50,
+        50,
         0L,
         TimeUnit.MILLISECONDS,
         LinkedBlockingQueue(7),

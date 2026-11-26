@@ -36,8 +36,8 @@ class PaymentAccountsConfig {
     @Value("#{'\${payment.accounts}'.split(',')}")
     lateinit var allowedAccounts: List<String>
 
-    @Value("\${payment.http-timeout-ms:2500}")
-    private var timeoutMillis: Long = 2500
+    @Value("\${payment.http-timeout-ms:1000}")
+    private var timeoutMillis: Long = 1000
 
     @Bean
     fun accountAdapters(paymentService: EventSourcingService<UUID, PaymentAggregate, PaymentAggregateState>, meterRegistry: MeterRegistry): List<PaymentExternalSystemAdapter> {
