@@ -39,9 +39,6 @@ class PaymentAccountsConfig {
     @Value("\${payment.http-timeout-ms:1000}")
     private var timeoutMillis: Long = 1000
 
-    @Value("\${payment.http2-prior-knowledge:true}")
-    private var useHttp2: Boolean = true
-
     @Bean
     fun accountAdapters(paymentService: EventSourcingService<UUID, PaymentAggregate, PaymentAggregateState>, meterRegistry: MeterRegistry): List<PaymentExternalSystemAdapter> {
         val request = HttpRequest.newBuilder()
@@ -66,8 +63,7 @@ class PaymentAccountsConfig {
                     paymentProviderHostPort,
                     token,
                     meterRegistry,
-                    timeoutMillis,
-                    useHttp2
+                    timeoutMillis
                 )
             }
     }

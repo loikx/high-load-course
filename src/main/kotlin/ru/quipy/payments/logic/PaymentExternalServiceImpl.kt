@@ -26,7 +26,6 @@ class PaymentExternalSystemAdapterImpl(
     private val token: String,
     private val meterRegistry: MeterRegistry,
     private val timeoutMillis: Long,
-    private val useHttp2: Boolean = false,
 ) : PaymentExternalSystemAdapter {
 
     companion object {
@@ -42,7 +41,7 @@ class PaymentExternalSystemAdapterImpl(
     private val parallelRequests = properties.parallelRequests
 
     private val client = OkHttpClient.Builder()
-        .apply { if (useHttp2) protocols(listOf(Protocol.H2_PRIOR_KNOWLEDGE)) }
+        .protocols(listOf(Protocol.H2_PRIOR_KNOWLEDGE))
         .connectTimeout(1000, TimeUnit.MILLISECONDS)
         .readTimeout(timeoutMillis, TimeUnit.MILLISECONDS)
         .writeTimeout(timeoutMillis, TimeUnit.MILLISECONDS)
@@ -97,15 +96,26 @@ class PaymentExternalSystemAdapterImpl(
 
             logger.info("[$accountName] Submit: $paymentId , txId: $transactionId")
 
+            // Recalculate the remaining deadline after waiting and event-store writes.
+            val remaining = deadline - now()
+            if (remaining <= 1) {
+                paymentESService.update(paymentId) {
+                    it.logProcessing(false, now(), transactionId, reason = "Deadline exceeded before HTTP call")
+                }
+                return PaymentAttempt(false)
+            }
+            val callBudgetMillis = minOf(timeoutMillis, remaining)
+            // Let the provider return its timeout before our own call timeout expires.
+            val providerBudget = Duration.ofMillis(
+                (callBudgetMillis - minOf(50L, callBudgetMillis / 10)).coerceAtLeast(1)
+            )
             val request = Request.Builder().run {
-                url("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount")
+                url("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount&timeout=$providerBudget")
                 post(emptyBody)
             }.build()
 
-            val remaining = deadline - now()
-            if (remaining <= 0) return PaymentAttempt(false)
             val call = client.newCall(request)
-            call.timeout().timeout(minOf(timeoutMillis, remaining), TimeUnit.MILLISECONDS)
+            call.timeout().timeout(callBudgetMillis, TimeUnit.MILLISECONDS)
             val started = System.nanoTime()
             var status = "error"
             var outcomeReason: String? = null
@@ -122,7 +132,7 @@ class PaymentExternalSystemAdapterImpl(
 
                     logger.warn("[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, succeeded: ${body.result}, message: ${body.message}")
 
-                    result = PaymentAttempt(body.result, !body.result && response.code in listOf(408, 429, 500, 502, 503, 504, 509))
+                    result = PaymentAttempt(body.result, !body.result && response.code in listOf(408, 429, 500, 502, 503, 504))
 
                     outcomeReason = body.message
                 }
